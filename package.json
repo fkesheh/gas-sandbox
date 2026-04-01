@@ -1,6 +1,6 @@
 {
   "name": "gas-sandbox",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Run Google Apps Script projects locally with a sandboxed spreadsheet and mock services",
   "type": "module",
   "main": "dist/index.js",
