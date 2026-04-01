@@ -5,3 +5,5 @@ data/*.json
 .env.local
 *.log
 dist/
+.coverage/
+coverage/

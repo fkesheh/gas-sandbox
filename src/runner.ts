@@ -13,12 +13,14 @@ export class GASRunner {
   private _spreadsheet: Spreadsheet;
   private _context: vm.Context | null;
   private _loaded: boolean;
+  private _tempDir: string | null;
 
   constructor(options: GASRunnerOptions = {}) {
     this._options = options;
     this._spreadsheet = new Spreadsheet();
     this._context = null;
     this._loaded = false;
+    this._tempDir = null;
     if (this._options.httpMode === 'capture') {
       this._options.capturedResponses = new Map();
     }
@@ -52,12 +54,24 @@ export class GASRunner {
       Int32Array
     });
 
-    const fullScript = gsFiles.map((filePath: string) => {
-      const code = fs.readFileSync(filePath, 'utf-8');
-      return `// === ${path.basename(filePath)} ===\n${code}\n`;
-    }).join('\n');
+    const resolvedDir = path.resolve(projectDir);
+    this._tempDir = path.join(resolvedDir, '.coverage');
+    fs.mkdirSync(this._tempDir, { recursive: true });
 
-    vm.runInContext(fullScript, this._context, { filename: 'project.gs' });
+    for (const filePath of gsFiles) {
+      let code = fs.readFileSync(filePath, 'utf-8');
+      // GAS uses a flat global namespace where all files share scope.
+      // vm.runInContext only shares var/function declarations across calls,
+      // so we convert top-level const/let to var for cross-file visibility.
+      code = code.replace(/^(const|let) /gm, 'var ');
+
+      const jsName = path.basename(filePath, '.gs') + '.js';
+      const tempPath = path.join(this._tempDir, jsName);
+      fs.writeFileSync(tempPath, code);
+
+      vm.runInContext(code, this._context, { filename: tempPath });
+    }
+
     this._loaded = true;
 
     const functions = this.listFunctions();
