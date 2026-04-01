@@ -1,10 +1,21 @@
-/**
- * In-memory spreadsheet model that mirrors Google Apps Script's Spreadsheet/Sheet/Range API.
- * Data is stored as 2D arrays (0-indexed internally, 1-indexed in the public API).
- */
+export type CellValue = string | number | boolean | null;
+export type RowData = CellValue[];
+export type SheetData = RowData[];
+export interface SheetJSON {
+  data: SheetData;
+}
+export interface SpreadsheetJSON {
+  sheets: Record<string, SheetJSON>;
+}
 
-class Range {
-  constructor(sheet, row, col, numRows, numCols) {
+export class Range {
+  private _sheet: Sheet;
+  private _row: number;
+  private _col: number;
+  private _numRows: number;
+  private _numCols: number;
+
+  constructor(sheet: Sheet, row: number, col: number, numRows: number, numCols: number) {
     this._sheet = sheet;
     this._row = row;
     this._col = col;
@@ -12,7 +23,7 @@ class Range {
     this._numCols = numCols;
   }
 
-  getValue() {
+  getValue(): CellValue {
     const r = this._row - 1;
     const c = this._col - 1;
     const data = this._sheet._data;
@@ -22,10 +33,10 @@ class Range {
     return '';
   }
 
-  getValues() {
-    const result = [];
+  getValues(): CellValue[][] {
+    const result: CellValue[][] = [];
     for (let r = 0; r < this._numRows; r++) {
-      const row = [];
+      const row: CellValue[] = [];
       for (let c = 0; c < this._numCols; c++) {
         const dataRow = this._row - 1 + r;
         const dataCol = this._col - 1 + c;
@@ -41,13 +52,13 @@ class Range {
     return result;
   }
 
-  setValue(value) {
+  setValue(value: CellValue): Range {
     this._ensureSize(this._row, this._col);
     this._sheet._data[this._row - 1][this._col - 1] = value;
     return this;
   }
 
-  setValues(values) {
+  setValues(values: CellValue[][]): Range {
     for (let r = 0; r < values.length; r++) {
       for (let c = 0; c < values[r].length; c++) {
         const dataRow = this._row - 1 + r;
@@ -59,7 +70,7 @@ class Range {
     return this;
   }
 
-  clear() {
+  clear(): Range {
     for (let r = 0; r < this._numRows; r++) {
       for (let c = 0; c < this._numCols; c++) {
         const dataRow = this._row - 1 + r;
@@ -72,7 +83,7 @@ class Range {
     return this;
   }
 
-  _ensureSize(row, col) {
+  private _ensureSize(row: number, col: number): void {
     const data = this._sheet._data;
     while (data.length < row) {
       data.push([]);
@@ -84,16 +95,21 @@ class Range {
     }
   }
 
-  // Formatting no-ops — chainable
-  setFontWeight() { return this; }
-  setBackground() { return this; }
-  setFontColor() { return this; }
-  setNumberFormat() { return this; }
-  setFontSize() { return this; }
+  setFontWeight(_weight?: string): Range { return this; }
+  setBackground(_color?: string): Range { return this; }
+  setFontColor(_color?: string): Range { return this; }
+  setNumberFormat(_format?: string): Range { return this; }
+  setFontSize(_size?: number): Range { return this; }
 }
 
-class Sheet {
-  constructor(name) {
+export class Sheet {
+  _name: string;
+  _data: CellValue[][];
+  private _frozenRows: number;
+  private _frozenColumns: number;
+  private _sheetId: number;
+
+  constructor(name: string) {
     this._name = name;
     this._data = [];
     this._frozenRows = 0;
@@ -101,15 +117,15 @@ class Sheet {
     this._sheetId = Math.floor(Math.random() * 1000000);
   }
 
-  getName() { return this._name; }
-  getSheetId() { return this._sheetId; }
-  setName(name) { this._name = name; return this; }
+  getName(): string { return this._name; }
+  getSheetId(): number { return this._sheetId; }
+  setName(name: string): Sheet { this._name = name; return this; }
 
-  getRange(row, col, numRows, numCols) {
+  getRange(row: number, col: number, numRows?: number, numCols?: number): Range {
     return new Range(this, row, col, numRows || 1, numCols || 1);
   }
 
-  getLastRow() {
+  getLastRow(): number {
     for (let r = this._data.length - 1; r >= 0; r--) {
       if (this._data[r].some(cell => cell !== '' && cell !== null && cell !== undefined)) {
         return r + 1;
@@ -118,7 +134,7 @@ class Sheet {
     return 0;
   }
 
-  getLastColumn() {
+  getLastColumn(): number {
     let maxCol = 0;
     for (let r = 0; r < this._data.length; r++) {
       for (let c = this._data[r].length - 1; c >= 0; c--) {
@@ -131,11 +147,11 @@ class Sheet {
     return maxCol;
   }
 
-  getMaxRows() {
+  getMaxRows(): number {
     return Math.max(this._data.length, 1000);
   }
 
-  getMaxColumns() {
+  getMaxColumns(): number {
     let max = 0;
     for (const row of this._data) {
       max = Math.max(max, row.length);
@@ -143,42 +159,45 @@ class Sheet {
     return Math.max(max, 26);
   }
 
-  setFrozenRows(n) { this._frozenRows = n; return this; }
-  setFrozenColumns(n) { this._frozenColumns = n; return this; }
-  autoResizeColumns() { return this; }
-  setColumnWidth() { return this; }
+  setFrozenRows(n: number): Sheet { this._frozenRows = n; return this; }
+  setFrozenColumns(n: number): Sheet { this._frozenColumns = n; return this; }
+  autoResizeColumns(_startCol?: number, _numCols?: number): Sheet { return this; }
+  setColumnWidth(_col?: number, _width?: number): Sheet { return this; }
 }
 
-class Spreadsheet {
+export class Spreadsheet {
+  private _sheets: Map<string, Sheet>;
+  private _activeSheet: Sheet | null;
+
   constructor() {
     this._sheets = new Map();
     this._activeSheet = null;
   }
 
-  getSheetByName(name) {
+  getSheetByName(name: string): Sheet | null {
     return this._sheets.get(name) || null;
   }
 
-  insertSheet(name) {
+  insertSheet(name: string): Sheet {
     const sheet = new Sheet(name);
     this._sheets.set(name, sheet);
     if (!this._activeSheet) this._activeSheet = sheet;
     return sheet;
   }
 
-  getSheets() {
+  getSheets(): Sheet[] {
     return Array.from(this._sheets.values());
   }
 
-  getActiveSheet() {
+  getActiveSheet(): Sheet | null {
     return this._activeSheet || this.getSheets()[0] || null;
   }
 
-  toast(message, title) {
+  toast(message: string, title?: string): void {
     console.log(`[TOAST] ${title || 'Info'}: ${message}`);
   }
 
-  loadFromJSON(data) {
+  loadFromJSON(data: SpreadsheetJSON): void {
     if (!data.sheets) return;
     for (const [name, sheetData] of Object.entries(data.sheets)) {
       const sheet = this.insertSheet(name);
@@ -188,13 +207,11 @@ class Spreadsheet {
     }
   }
 
-  toJSON() {
-    const result = { sheets: {} };
+  toJSON(): SpreadsheetJSON {
+    const result: SpreadsheetJSON = { sheets: {} };
     for (const [name, sheet] of this._sheets) {
       result.sheets[name] = { data: sheet._data };
     }
     return result;
   }
 }
-
-module.exports = { Spreadsheet, Sheet, Range };

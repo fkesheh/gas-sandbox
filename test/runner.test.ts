@@ -1,9 +1,11 @@
-const { describe, it } = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('path');
-const { GASRunner } = require('../src/runner');
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import fs from 'node:fs';
+import XLSX from 'xlsx';
+import { GASRunner } from '../src/runner.js';
 
-const FIXTURES_DIR = path.join(__dirname, 'fixtures');
+const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures');
 
 describe('GASRunner', () => {
   it('loads .gs files and lists functions', () => {
@@ -71,7 +73,6 @@ describe('GASRunner', () => {
     runner.loadProject(path.join(FIXTURES_DIR, 'sample-project'));
 
     const result = runner.run('fetchData');
-    // JSON round-trip needed: VM context objects have different prototypes
     assert.deepEqual(JSON.parse(JSON.stringify(result)), { items: [1, 2, 3] });
   });
 
@@ -103,75 +104,67 @@ describe('GASRunner', () => {
     assert.throws(() => runner.run('nonExistent'), /not found/);
   });
 
-  it('free-owner exclusion works with cursor-admin-sheet project', () => {
-    // getFreeOwnerIds() checks for this token before calling the API
-    process.env.CURSOR_ADMIN_TOKEN = 'Bearer test-token';
+  it('role-based filtering excludes observer users', () => {
+    process.env.API_TOKEN = 'Bearer test-token';
 
     const runner = new GASRunner({
       httpMode: 'mock',
       skipSleep: true,
       mockResponses: {
-        'api.cursor.com/teams/members': {
+        'api.acmecorp.com/teams/team-001/members': {
           statusCode: 200,
           body: {
-            teamMembers: [
-              { id: 'user-1', email: 'alice@test.com', role: 'member' },
-              { id: 'user-2', email: 'bob@test.com', role: 'member' },
-              { id: 'free-1', email: 'admin@test.com', role: 'free-owner' }
+            members: [
+              { name: 'Alice', email: 'alice@acmecorp.com', role: 'admin' },
+              { name: 'Bob', email: 'bob@acmecorp.com', role: 'member' },
+              { name: 'Charlie', email: 'charlie@acmecorp.com', role: 'observer' },
+              { name: 'Diana', email: 'diana@acmecorp.com', role: 'member' }
             ]
           }
         }
       }
     });
 
-    // Raw data: 3 users, 2 days. free-1 is a free-owner.
+    runner.loadProject(path.join(FIXTURES_DIR, 'role-filter-project'));
+    const result = JSON.parse(JSON.stringify(runner.run('processTeam')));
+
+    assert.equal(result.totalMembers, 4);
+    assert.equal(result.activeMembers, 3);
+    assert.equal(result.excludedCount, 1);
+
+    const sheet = runner.getSpreadsheet().getSheetByName('Results');
+    assert.ok(sheet, 'Results sheet should exist');
+    assert.equal(sheet._data[0][0], 'Name');
+    assert.equal(sheet._data.length, 4); // header + 3 active members
+
+    delete process.env.API_TOKEN;
+  });
+
+  it('exportXlsx creates valid XLSX file', async () => {
+    const runner = new GASRunner({ httpMode: 'mock', skipSleep: true, mockResponses: {} });
     runner.loadData({
       sheets: {
-        'Raw Data': {
-          data: [
-            ['Date', 'User ID', 'Email', 'Is Active',
-             'Total Lines Added', 'Total Lines Deleted',
-             'Accepted Lines Added', 'Accepted Lines Deleted',
-             'Total Applies', 'Total Accepts', 'Total Rejects',
-             'Total Tabs Shown', 'Total Tabs Accepted',
-             'Composer Requests', 'Chat Requests', 'Agent Requests',
-             'CMDK Usages', 'Subscription Included Reqs', 'API Key Reqs',
-             'Usage Based Reqs', 'Bugbot Usages', 'Most Used Model',
-             'Apply Most Used Extension', 'Tab Most Used Extension',
-             'Client Version', 'Last Updated', 'Import Count'],
-            ['2025-05-05', 'user-1', 'alice@test.com', true,
-             100, 50, 80, 40, 5, 3, 1, 20, 15, 10, 5, 3, 2, 50, 0, 0, 1, 'gpt-4', '', '', '0.1', '', 1],
-            ['2025-05-05', 'user-2', 'bob@test.com', true,
-             200, 100, 150, 75, 10, 8, 2, 40, 30, 20, 10, 6, 4, 100, 0, 0, 0, 'gpt-4', '', '', '0.1', '', 1],
-            ['2025-05-05', 'free-1', 'admin@test.com', true,
-             10, 5, 8, 4, 1, 1, 0, 5, 3, 2, 1, 0, 0, 10, 0, 0, 0, 'gpt-4', '', '', '0.1', '', 1],
-          ]
-        }
+        'Sales': { data: [['Product', 'Revenue'], ['Widget', 1000], ['Gadget', 2500]] },
+        'Inventory': { data: [['Item', 'Qty'], ['Widget', 50]] }
       }
     });
+    runner.loadProject(path.join(FIXTURES_DIR, 'sample-project'));
 
-    const projectDir = path.resolve(__dirname, '..', '..', 'cursor-admin-sheet');
-    runner.loadProject(projectDir);
+    const tmpPath = path.join(import.meta.dirname, '..', 'tmp-test-export.xlsx');
 
-    // Run WBR aggregation
-    const rawData = runner.run('getRawData');
-    const wbrData = runner.run('aggregateWBRData', rawData, 'weekly');
+    try {
+      runner.exportXlsx(tmpPath);
 
-    // JSON round-trip to normalize cross-VM objects
-    const metrics = JSON.parse(JSON.stringify(wbrData.metrics));
+      const wb = XLSX.readFile(tmpPath);
 
-    // totalUsers should be 2 (excluding free-owner), NOT 3
-    assert.equal(metrics['Cursor Licensed Users'][0], 2,
-      'Free-owner should be excluded from licensed users');
+      assert.ok(wb.SheetNames.includes('Sales'), 'Should have Sales sheet');
+      assert.ok(wb.SheetNames.includes('Inventory'), 'Should have Inventory sheet');
 
-    // activeUsers should also be 2 (free-owner was active but excluded)
-    assert.equal(metrics['Cursor Active Users'][0], 2,
-      'Free-owner should be excluded from active users');
-
-    // bugbotActiveUsers: only user-1 used bugbot (1 usage), free-1 had 0
-    assert.equal(metrics['Cursor Bugbot Active Users'][0], 1,
-      'Only paid users with bugbot usage should count');
-
-    delete process.env.CURSOR_ADMIN_TOKEN;
+      const salesData = XLSX.utils.sheet_to_json(wb.Sheets['Sales'], { header: 1 });
+      assert.deepEqual(salesData[0], ['Product', 'Revenue']);
+      assert.deepEqual(salesData[1], ['Widget', 1000]);
+    } finally {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    }
   });
 });

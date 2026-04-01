@@ -1,20 +1,42 @@
 {
   "name": "gas-sandbox",
   "version": "0.1.0",
-  "description": "Run Google Apps Script projects locally with a sandboxed spreadsheet filesystem",
-  "main": "src/runner.js",
+  "description": "Run Google Apps Script projects locally with a sandboxed spreadsheet and mock services",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
-    "gas-sandbox": "bin/gas-sandbox.js"
+    "gas-sandbox": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "test": "tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": ["google-apps-script", "gas", "sandbox", "testing", "spreadsheet"],
+  "keywords": [
+    "google-apps-script",
+    "gas",
+    "sandbox",
+    "testing",
+    "spreadsheet"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }
